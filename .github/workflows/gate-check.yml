@@ -1,0 +1,12 @@
+name: Contract Drift Gate Check
+on: [deployment]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: contract-drift-sentinel/gate-action@v1
+        with:
+          service: ${{ github.event.deployment.task }}
+          version: ${{ github.sha }}
+          environment: ${{ github.event.deployment.environment }}
+          gate_url: ${{ secrets.GATE_URL }}

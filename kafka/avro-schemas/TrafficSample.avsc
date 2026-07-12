@@ -1,0 +1,41 @@
+{
+  "namespace": "com.contractsentinel.sidecar.avro",
+  "type": "record",
+  "name": "TrafficSample",
+  "fields": [
+    {
+      "name": "service_id",
+      "type": "string"
+    },
+    {
+      "name": "endpoint",
+      "type": "string"
+    },
+    {
+      "name": "method",
+      "type": "string"
+    },
+    {
+      "name": "request_schema_sample",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "name": "response_schema_sample",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "name": "status_code",
+      "type": "int"
+    },
+    {
+      "name": "ts",
+      "type": "long"
+    },
+    {
+      "name": "sampled_at",
+      "type": "long"
+    }
+  ]
+}

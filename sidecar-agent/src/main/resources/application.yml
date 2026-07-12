@@ -1,0 +1,43 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: sidecar-agent
+
+kafka:
+  bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  topic:
+    raw-traffic: raw-traffic
+  producer:
+    key-serializer: org.apache.kafka.common.serialization.StringSerializer
+    value-serializer: io.confluent.kafka.serializers.KafkaAvroSerializer
+    properties:
+      schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
+      acks: all
+      retries: 3
+      compression.type: snappy
+      batch.size: 16384
+      linger.ms: 5
+      buffer.memory: 33554432
+
+sampling:
+  max-samples-per-minute: 1000
+  error-priority-boost: 2.0
+
+sidecar:
+  service-id: ${SERVICE_ID:default-service}
+
+logging:
+  level:
+    com.contractsentinel: INFO
+    org.apache.kafka: WARN
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}

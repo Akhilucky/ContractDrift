@@ -1,0 +1,45 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: ingestion-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ingestion-group-${ENV:dev}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: io.confluent.kafka.serializers.KafkaAvroDeserializer
+      properties:
+        schema.registry.url: ${SCHEMA_REGISTRY_URL:http://localhost:8081}
+        specific.avro.reader: true
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual
+      concurrency: 6
+
+ingestion:
+  dedup:
+    window-duration: 5m
+  grpc:
+    inference:
+      host: ${INFERENCE_HOST:localhost}
+      port: ${INFERENCE_PORT:50051}
+  clickhouse:
+    jdbc-url: ${CLICKHOUSE_JDBC_URL:jdbc:clickhouse://localhost:8123/contract_sentinel}
+    username: ${CLICKHOUSE_USER:default}
+    password: ${CLICKHOUSE_PASSWORD:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    com.contractsentinel: INFO

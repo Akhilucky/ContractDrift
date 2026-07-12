@@ -1,0 +1,184 @@
+version: "3.9"
+
+x-kafka-vars: &kafka-vars
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+
+x-postgres-vars: &postgres-vars
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/contract_sentinel
+  SPRING_DATASOURCE_USERNAME: sentinel
+  SPRING_DATASOURCE_PASSWORD: sentinel_secret
+
+x-redis-vars: &redis-vars
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    restart: unless-stopped
+    depends_on: [zookeeper]
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    restart: unless-stopped
+    depends_on: [kafka]
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: contract_sentinel
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./contract-registry/src/main/resources/db/migration:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - chdata:/var/lib/clickhouse
+
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:10.4.1
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on: [prometheus]
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+
+  # ── Sentinel Services ──────────────────────────────────────────
+  sidecar-agent:
+    build: ./sidecar-agent
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      <<: *kafka-vars
+      SERVER_PORT: 8090
+
+  ingestion-service:
+    build: ./ingestion-service
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      <<: *kafka-vars
+      <<: *postgres-vars
+      <<: *redis-vars
+      CLICKHOUSE_URL: jdbc:clickhouse://clickhouse:8123/contract_sentinel
+      GRPC_INFERENCE_HOST: schema-inference
+      GRPC_INFERENCE_PORT: 50051
+
+  schema-inference:
+    build: ./schema-inference
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+    environment:
+      <<: *redis-vars
+      REDIS_TTL_SECONDS: 600
+
+  drift-detector:
+    build: ./drift-detector
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      <<: *kafka-vars
+      <<: *postgres-vars
+      <<: *redis-vars
+
+  contract-registry:
+    build: ./contract-registry
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      <<: *postgres-vars
+      <<: *redis-vars
+
+  promotion-gate:
+    build: ./promotion-gate
+    restart: unless-stopped
+    ports:
+      - "8084:8084"
+    environment:
+      <<: *kafka-vars
+      <<: *postgres-vars
+      DRIFT_DETECTOR_URL: http://drift-detector:8082
+
+  correlation-engine:
+    build: ./correlation-engine
+    restart: unless-stopped
+    environment:
+      <<: *kafka-vars
+      <<: *postgres-vars
+      GITHUB_TOKEN: ""
+      POLL_INTERVAL_SECONDS: 60
+
+  dashboard:
+    build: ./dashboard
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://contract-registry:8083
+
+volumes:
+  pgdata:
+  chdata:

@@ -1,0 +1,8 @@
+grpcio
+grpcio-tools
+genson
+redis
+jsonschema
+openapi-schema-validator
+pydantic
+protobuf

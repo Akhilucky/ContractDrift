@@ -1,0 +1,19 @@
+syntax = "proto3";
+package inference;
+service SchemaInference {
+  rpc InferSchema(InferSchemaRequest) returns (InferSchemaResponse);
+}
+message InferSchemaRequest {
+  string service_id = 1;
+  string endpoint = 2;
+  string method = 3;
+  repeated string samples = 4;
+}
+message InferSchemaResponse {
+  string schema_json = 1;
+  string service_id = 2;
+  string endpoint = 3;
+  string method = 4;
+  int32 sample_count = 5;
+  bool cached = 6;
+}

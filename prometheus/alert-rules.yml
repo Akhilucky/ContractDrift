@@ -1,0 +1,30 @@
+groups:
+  - name: contract-drift
+    interval: 30s
+    rules:
+      - alert: BreakingContractDrift
+        expr: sentinel_drift_score_gauge > 0
+        for: 1m
+        labels:
+          severity: P1
+        annotations:
+          summary: "Breaking contract drift detected for {{ $labels.provider }} -> {{ $labels.consumer }}"
+          description: "Contract drift score {{ $value }} on endpoint {{ $labels.endpoint }}"
+
+      - alert: PromotionBlocked
+        expr: sentinel_gate_decisions_total{decision="deny"} > 5
+        for: 2m
+        labels:
+          severity: P1
+        annotations:
+          summary: "Multiple promotions blocked for {{ $labels.service }}"
+          description: "{{ $value }} promotions denied for service {{ $labels.service }}"
+
+      - alert: HighInferenceLatency
+        expr: sentinel_inference_latency_seconds{p95} > 5
+        for: 5m
+        labels:
+          severity: P2
+        annotations:
+          summary: "Schema inference latency high for {{ $labels.endpoint }}"
+          description: "P95 inference latency {{ $value }}s for {{ $labels.endpoint }}"

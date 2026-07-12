@@ -1,0 +1,50 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: correlation-engine
+  datasource:
+    url: jdbc:postgresql://localhost:5432/contract_sentinel
+    username: sentinel
+    password: sentinel
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: correlation-engine
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+kafka:
+  topic:
+    deployment-events: deployment-events
+    contract-violations: contract-violations
+
+github:
+  org: myorg
+  repo: myrepo
+  token: ${GITHUB_TOKEN}
+
+polling:
+  interval:
+    ms: 60000
+
+correlation:
+  window:
+    minutes: 30
+
+logging:
+  level:
+    com.contractsentinel: INFO
