@@ -30,3 +30,7 @@ logging:
   level:
     com.contractsentinel: INFO
     org.springframework: WARN
+
+sentinel:
+  auth:
+    jwt-secret: ${JWT_SECRET:change-me-in-production-at-least-32-chars!!}

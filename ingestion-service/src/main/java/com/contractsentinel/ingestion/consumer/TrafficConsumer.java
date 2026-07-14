@@ -5,6 +5,11 @@ import com.contractsentinel.ingestion.grpc.InferenceClient;
 import com.contractsentinel.ingestion.model.NormalizedSample;
 import com.contractsentinel.ingestion.normalizer.PayloadNormalizer;
 import com.google.common.hash.Hashing;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Scope;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,53 +46,104 @@ public class TrafficConsumer {
 
     @KafkaListener(topics = "raw-traffic", groupId = "ingestion-group-${ENV:dev}")
     public void onMessage(ConsumerRecord<String, Object> record, Acknowledgment ack) {
-        log.debug("Received record from partition {} offset {}", record.partition(), record.offset());
+        Span consumeSpan = GlobalOpenTelemetry.getTracer("contract-sentinel")
+                .spanBuilder("kafka.consume")
+                .setSpanKind(SpanKind.CONSUMER)
+                .setAttribute("messaging.system", "kafka")
+                .setAttribute("messaging.destination", "raw-traffic")
+                .setAttribute("messaging.message.id", record.key() != null ? record.key() : "")
+                .setAttribute("messaging.kafka.partition", (long) record.partition())
+                .setAttribute("messaging.kafka.offset", record.offset())
+                .startSpan();
 
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            String rawPayload = deserializePayload(record);
-            String contentHash = Hashing.sha256()
-                    .hashString(rawPayload, StandardCharsets.UTF_8)
-                    .toString();
+        try (Scope scope = consumeSpan.makeCurrent()) {
+            log.debug("Received record from partition {} offset {}", record.partition(), record.offset());
 
-            if (deduplicationService.isDuplicate(contentHash)) {
-                log.debug("Duplicate message skipped, hash: {}", contentHash);
+            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                String rawPayload = deserializePayload(record);
+                String contentHash = Hashing.sha256()
+                        .hashString(rawPayload, StandardCharsets.UTF_8)
+                        .toString();
+
+                if (deduplicationService.isDuplicate(contentHash)) {
+                    log.debug("Duplicate message skipped, hash: {}", contentHash);
+                    consumeSpan.setAttribute("message.duplicate", true);
+                    ack.acknowledge();
+                    return;
+                }
+
+                Span normalizeSpan = GlobalOpenTelemetry.getTracer("contract-sentinel")
+                        .spanBuilder("payload.normalize")
+                        .setAttribute("content.hash", contentHash)
+                        .startSpan();
+                String normalized;
+                try (Scope normalizeScope = normalizeSpan.makeCurrent()) {
+                    normalized = payloadNormalizer.normalize(rawPayload);
+                    normalizeSpan.setAttribute("payload.size", normalized.length());
+                } finally {
+                    normalizeSpan.end();
+                }
+
+                String serviceId = extractServiceId(record);
+                String endpoint = extractEndpoint(record);
+                String method = extractMethod(record);
+
+                consumeSpan.setAttribute("service.id", serviceId);
+                consumeSpan.setAttribute("endpoint", endpoint);
+                consumeSpan.setAttribute("http.method", method);
+
+                var sample = new NormalizedSample(
+                        serviceId, endpoint, method, normalized, contentHash, Instant.now()
+                );
+
+                Span inferenceSpan = GlobalOpenTelemetry.getTracer("contract-sentinel")
+                        .spanBuilder("schema.inference")
+                        .setAttribute("service.id", serviceId)
+                        .setAttribute("endpoint", endpoint)
+                        .setAttribute("http.method", method)
+                        .startSpan();
+
+                Span persistSpan = GlobalOpenTelemetry.getTracer("contract-sentinel")
+                        .spanBuilder("clickhouse.persist")
+                        .setAttribute("service.id", serviceId)
+                        .setAttribute("endpoint", endpoint)
+                        .startSpan();
+
+                CompletableFuture<Void> persistFuture = CompletableFuture.runAsync(() -> {
+                    try (Scope s = persistSpan.makeCurrent()) {
+                        clickHouseRepository.insertSample(sample);
+                    } finally {
+                        persistSpan.end();
+                    }
+                }, executor);
+
+                CompletableFuture<Void> inferenceFuture = CompletableFuture.runAsync(() -> {
+                    try (Scope s = inferenceSpan.makeCurrent()) {
+                        inferenceClient.inferSchema(
+                                List.of(normalized), serviceId, endpoint, method
+                        ).get();
+                    } catch (Exception e) {
+                        inferenceSpan.setStatus(StatusCode.ERROR, e.getMessage());
+                        log.warn("Schema inference failed asynchronously: {}", e.getMessage());
+                    } finally {
+                        inferenceSpan.end();
+                    }
+                }, executor);
+
+                CompletableFuture.allOf(persistFuture, inferenceFuture).join();
+
+                deduplicationService.markProcessed(contentHash);
                 ack.acknowledge();
-                return;
+
+                consumeSpan.setAttribute("message.processed", true);
+                log.info("Processed sample for {}/{}:{}", serviceId, endpoint, method);
+            } catch (Exception e) {
+                consumeSpan.setStatus(StatusCode.ERROR, e.getMessage());
+                log.error("Failed to process Kafka message: {}", e.getMessage(), e);
+                ack.acknowledge();
             }
-
-            String normalized = payloadNormalizer.normalize(rawPayload);
-
-            String serviceId = extractServiceId(record);
-            String endpoint = extractEndpoint(record);
-            String method = extractMethod(record);
-
-            var sample = new NormalizedSample(
-                    serviceId, endpoint, method, normalized, contentHash, Instant.now()
-            );
-
-            CompletableFuture<Void> persistFuture = CompletableFuture.runAsync(
-                    () -> clickHouseRepository.insertSample(sample), executor);
-
-            CompletableFuture<Void> inferenceFuture = CompletableFuture.runAsync(
-                    () -> {
-                        try {
-                            inferenceClient.inferSchema(
-                                    List.of(normalized), serviceId, endpoint, method
-                            ).get();
-                        } catch (Exception e) {
-                            log.warn("Schema inference failed asynchronously: {}", e.getMessage());
-                        }
-                    }, executor);
-
-            CompletableFuture.allOf(persistFuture, inferenceFuture).join();
-
-            deduplicationService.markProcessed(contentHash);
-            ack.acknowledge();
-
-            log.info("Processed sample for {}/{}:{}", serviceId, endpoint, method);
-        } catch (Exception e) {
-            log.error("Failed to process Kafka message: {}", e.getMessage(), e);
-            ack.acknowledge();
+        } finally {
+            consumeSpan.end();
         }
     }
 

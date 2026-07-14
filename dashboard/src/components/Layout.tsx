@@ -1,6 +1,6 @@
 import { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Shield, FileText, AlertTriangle, BarChart3 } from 'lucide-react'
+import { Shield, FileText, AlertTriangle, BarChart3, Activity } from 'lucide-react'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: BarChart3 },
@@ -45,7 +45,16 @@ export default function Layout({ children }: LayoutProps) {
             </NavLink>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-700">
+        <div className="p-4 border-t border-slate-700 space-y-3">
+          <a
+            href="http://localhost:16686"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-colors"
+          >
+            <Activity className="w-5 h-5" />
+            Jaeger Traces
+          </a>
           <p className="text-xs text-slate-500">Contract Sentinel v1.0</p>
         </div>
       </aside>

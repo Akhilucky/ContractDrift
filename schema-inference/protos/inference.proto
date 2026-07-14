@@ -2,6 +2,7 @@ syntax = "proto3";
 package inference;
 service SchemaInference {
   rpc InferSchema(InferSchemaRequest) returns (InferSchemaResponse);
+  rpc InferSchemaFromProto(InferProtoRequest) returns (InferProtoResponse);
 }
 message InferSchemaRequest {
   string service_id = 1;
@@ -16,4 +17,19 @@ message InferSchemaResponse {
   string method = 4;
   int32 sample_count = 5;
   bool cached = 6;
+}
+message InferProtoRequest {
+  string service_id = 1;
+  string endpoint = 2;
+  string method = 3;
+  string proto_content = 4;
+  string package_name = 5;
+  string message_type = 6;
+}
+message InferProtoResponse {
+  string schema_json = 1;
+  string service_id = 2;
+  string endpoint = 3;
+  string message_type = 4;
+  bool cached = 5;
 }

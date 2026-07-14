@@ -1,0 +1,22 @@
+policies:
+  - name: "block-breaking"
+    description: "Deny if any BREAKING violation in last 24h"
+    conditions:
+      - severity: "BREAKING"
+        min_count: 1
+        window: "24h"
+    action: "deny"
+  - name: "warn-on-warnings"
+    description: "Warn if 5+ WARNING violations in last 1h"
+    conditions:
+      - severity: "WARNING"
+        min_count: 5
+        window: "1h"
+    action: "warn"
+  - name: "block-critical-services"
+    description: "Deny if any violation on payment-service in last 1h"
+    conditions:
+      - severity: "BREAKING"
+        min_count: 1
+        window: "1h"
+    action: "deny"

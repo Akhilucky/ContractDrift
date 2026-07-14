@@ -35,3 +35,11 @@ management:
 logging:
   level:
     com.contractsentinel: INFO
+
+sentinel:
+  auth:
+    jwt-secret: ${JWT_SECRET:change-me-in-production-at-least-32-chars!!}
+  policy:
+    path: ${POLICIES_PATH:classpath:policies.yml}
+  contract-registry:
+    url: ${CONTRACT_REGISTRY_URL:http://localhost:8083}

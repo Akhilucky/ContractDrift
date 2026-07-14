@@ -6,3 +6,9 @@ jsonschema
 openapi-schema-validator
 pydantic
 protobuf
+grpcio-tools
+opentelemetry-distro
+opentelemetry-instrumentation-grpc
+opentelemetry-exporter-otlp-proto-grpc
+pyjwt
+cryptography

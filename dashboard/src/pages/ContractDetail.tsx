@@ -1,7 +1,9 @@
+import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { getContract } from '../lib/api'
+import DiffViewer from '../components/DiffViewer'
 
 export default function ContractDetail() {
   const { id } = useParams<{ id: string }>()
@@ -10,6 +12,11 @@ export default function ContractDetail() {
     queryFn: () => getContract(id!),
     enabled: !!id,
   })
+
+  const baselineSchema = useMemo(() => {
+    if (!contract?.schema) return null
+    return contract.schema as Record<string, unknown>
+  }, [contract])
 
   if (isLoading) {
     return <div className="text-slate-400">Loading...</div>
@@ -48,12 +55,11 @@ export default function ContractDetail() {
         </div>
       </div>
 
-      <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
-        <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">Schema / Contract JSON</h3>
-        <pre className="text-xs text-slate-300 bg-slate-900 rounded-lg p-4 max-h-[500px] overflow-auto font-mono">
-          {JSON.stringify(contract.schema ?? contract, null, 2)}
-        </pre>
-      </div>
+      <DiffViewer
+        oldSchema={baselineSchema}
+        newSchema={baselineSchema}
+        title={`${contract.provider} → ${contract.consumer} Schema`}
+      />
 
       <div className="bg-slate-800 rounded-lg border border-slate-700 p-4">
         <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">Metadata</h3>

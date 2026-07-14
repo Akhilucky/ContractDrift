@@ -3,6 +3,8 @@ package com.contractsentinel.ingestion.grpc;
 import inference.SchemaInferenceGrpc;
 import inference.InferSchemaRequest;
 import inference.InferSchemaResponse;
+import inference.InferProtoRequest;
+import inference.InferProtoResponse;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import jakarta.annotation.PreDestroy;
@@ -53,6 +55,37 @@ public class InferenceClient {
             } catch (Exception e) {
                 log.error("Schema inference failed for {}/{}: {}", serviceId, endpoint, e.getMessage());
                 throw new RuntimeException("gRPC inference failed", e);
+            }
+        });
+    }
+
+    public CompletableFuture<String> inferSchemaFromProto(
+            String protoContent,
+            String serviceId,
+            String endpoint,
+            String method,
+            String packageName,
+            String messageType) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                var blockingStub = SchemaInferenceGrpc.newBlockingStub(channel)
+                        .withDeadlineAfter(30, TimeUnit.SECONDS);
+
+                var request = InferProtoRequest.newBuilder()
+                        .setServiceId(serviceId)
+                        .setEndpoint(endpoint)
+                        .setMethod(method)
+                        .setProtoContent(protoContent)
+                        .setPackageName(packageName)
+                        .setMessageType(messageType)
+                        .build();
+
+                InferProtoResponse response = blockingStub.inferSchemaFromProto(request);
+                log.info("Proto schema inference completed for {}/{} message={}", serviceId, endpoint, messageType);
+                return response.getSchemaJson();
+            } catch (Exception e) {
+                log.error("Proto schema inference failed for {}/{}: {}", serviceId, endpoint, e.getMessage());
+                throw new RuntimeException("gRPC proto inference failed", e);
             }
         });
     }

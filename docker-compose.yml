@@ -101,6 +101,16 @@ services:
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    restart: unless-stopped
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+
   # ── Sentinel Services ──────────────────────────────────────────
   sidecar-agent:
     build: ./sidecar-agent
@@ -110,6 +120,11 @@ services:
     environment:
       <<: *kafka-vars
       SERVER_PORT: 8090
+      OTEL_SERVICE_NAME: sidecar-agent
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
 
   ingestion-service:
     build: ./ingestion-service
@@ -123,6 +138,11 @@ services:
       CLICKHOUSE_URL: jdbc:clickhouse://clickhouse:8123/contract_sentinel
       GRPC_INFERENCE_HOST: schema-inference
       GRPC_INFERENCE_PORT: 50051
+      OTEL_SERVICE_NAME: ingestion-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
 
   schema-inference:
     build: ./schema-inference
@@ -132,6 +152,11 @@ services:
     environment:
       <<: *redis-vars
       REDIS_TTL_SECONDS: 600
+      OTEL_SERVICE_NAME: schema-inference
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
 
   drift-detector:
     build: ./drift-detector
@@ -142,6 +167,11 @@ services:
       <<: *kafka-vars
       <<: *postgres-vars
       <<: *redis-vars
+      OTEL_SERVICE_NAME: drift-detector
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
 
   contract-registry:
     build: ./contract-registry
@@ -151,6 +181,11 @@ services:
     environment:
       <<: *postgres-vars
       <<: *redis-vars
+      OTEL_SERVICE_NAME: contract-registry
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
 
   promotion-gate:
     build: ./promotion-gate
@@ -161,6 +196,11 @@ services:
       <<: *kafka-vars
       <<: *postgres-vars
       DRIFT_DETECTOR_URL: http://drift-detector:8082
+      OTEL_SERVICE_NAME: promotion-gate
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
 
   correlation-engine:
     build: ./correlation-engine
@@ -170,6 +210,11 @@ services:
       <<: *postgres-vars
       GITHUB_TOKEN: ""
       POLL_INTERVAL_SECONDS: 60
+      OTEL_SERVICE_NAME: correlation-engine
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
 
   dashboard:
     build: ./dashboard

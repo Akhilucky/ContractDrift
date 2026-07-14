@@ -14,6 +14,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.util.ContentCachingRequestWrapper;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Collections;
@@ -57,6 +60,9 @@ public class TrafficInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
                                 Object handler, Exception ex) {
+        Span span = Span.current();
+        Span interceptorSpan = span.getSpanContext().isValid() ? span : io.opentelemetry.api.trace.Span.getNoop();
+
         try {
             ContentCachingRequestWrapper requestWrapper = getRequestWrapper(request);
             ContentCachingResponseWrapper responseWrapper = getResponseWrapper(response);
@@ -64,6 +70,18 @@ public class TrafficInterceptor implements HandlerInterceptor {
             String endpoint = getEndpoint(request);
             String method = request.getMethod();
             int statusCode = response.getStatus();
+
+            interceptorSpan = io.opentelemetry.api.GlobalOpenTelemetry.getTracer("contract-sentinel")
+                    .spanBuilder("traffic-interceptor")
+                    .setAttribute("service.id", serviceId)
+                    .setAttribute("endpoint", endpoint)
+                    .setAttribute("http.method", method)
+                    .setAttribute("http.status_code", (long) statusCode)
+                    .startSpan();
+
+            if (statusCode >= 400) {
+                interceptorSpan.setStatus(StatusCode.ERROR, "HTTP " + statusCode);
+            }
 
             String requestBody = extractBody(requestWrapper);
             String responseBody = extractBody(responseWrapper);
@@ -94,9 +112,13 @@ public class TrafficInterceptor implements HandlerInterceptor {
                         Instant.now()
                 );
                 publisher.publish(sample);
+                interceptorSpan.setAttribute("sample.published", true);
             }
         } catch (Exception e) {
+            interceptorSpan.setStatus(StatusCode.ERROR, e.getMessage());
             log.error("Error processing traffic interceptor for request", e);
+        } finally {
+            interceptorSpan.end();
         }
     }
 

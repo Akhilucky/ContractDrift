@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  sidecar-agent:
+    profiles: ["sidecar"]
+
+  envoy-proxy:
+    build:
+      context: ./envoy-wasm-filter
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "15006:15006"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TRAFFIC_TOPIC: raw-traffic
+      TRAFFIC_FILE_PATH: /tmp/traffic_samples.ndjson
+      SAMPLE_RATE: "1000"
+      ENVIRONMENT: development
+    volumes:
+      - traffic-samples:/tmp
+    depends_on:
+      - kafka
+
+  ingestion-service:
+    depends_on:
+      - kafka
+      - postgres
+      - redis
+      - schema-inference
+
+volumes:
+  traffic-samples:

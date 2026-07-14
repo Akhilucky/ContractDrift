@@ -1,13 +1,41 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { Shield, FileText, AlertTriangle, TrendingDown } from 'lucide-react'
-import { getContracts, getViolations, getViolationSummary, getGateHistory } from '../lib/api'
+import { Shield, FileText, AlertTriangle, TrendingDown, Wifi, WifiOff } from 'lucide-react'
+import { getContracts, getViolations, getViolationSummary, getGateHistory, Violation, GateDecision } from '../lib/api'
+import { useWebSocket } from '../hooks/useWebSocket'
+import { sentinelWs } from '../lib/websocket'
 
 export default function Dashboard() {
+  const queryClient = useQueryClient()
+  const [wsConnected, setWsConnected] = useState(false)
+  const [toast, setToast] = useState<{ message: string; severity: string } | null>(null)
+
   const { data: contracts } = useQuery({ queryKey: ['contracts'], queryFn: getContracts })
   const { data: violations } = useQuery({ queryKey: ['violations'], queryFn: () => getViolations() })
   const { data: summary } = useQuery({ queryKey: ['violation-summary'], queryFn: getViolationSummary })
   const { data: gateHistory } = useQuery({ queryKey: ['gate-history'], queryFn: () => getGateHistory() })
+
+  useWebSocket('violation:new', useCallback((data: unknown) => {
+    const violation = data as Violation
+    queryClient.setQueryData<Violation[]>(['violations'], (old) => {
+      if (!old) return [violation]
+      return [violation, ...old]
+    })
+    setToast({ message: violation.message || 'New violation detected', severity: violation.severity })
+    setTimeout(() => setToast(null), 5000)
+  }, [queryClient]))
+
+  useWebSocket('gate:decision', useCallback((data: unknown) => {
+    const decision = data as GateDecision
+    queryClient.setQueryData<GateDecision[]>(['gate-history'], (old) => {
+      if (!old) return [decision]
+      return [decision, ...old]
+    })
+  }, [queryClient]))
+
+  useWebSocket('connected', useCallback(() => setWsConnected(true), []))
+  useWebSocket('disconnected', useCallback(() => setWsConnected(false), []))
 
   const totalContracts = contracts?.length ?? 0
   const activeViolations = violations?.filter((v) => !v.resolved).length ?? 0
@@ -35,6 +63,19 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg border shadow-lg flex items-center gap-2 animate-pulse ${
+          toast.severity === 'BREAKING'
+            ? 'bg-red-900/90 border-red-500/50 text-red-200'
+            : toast.severity === 'WARNING'
+            ? 'bg-yellow-900/90 border-yellow-500/50 text-yellow-200'
+            : 'bg-green-900/90 border-green-500/50 text-green-200'
+        }`}>
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span className="text-sm">{toast.message}</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-4 gap-4">
         {summaryCards.map((card) => (
           <div key={card.label} className="bg-slate-800 rounded-lg border border-slate-700 p-5">
@@ -49,6 +90,25 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="flex items-center gap-2 text-xs text-slate-500">
+        {wsConnected ? (
+          <>
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
+            </span>
+            <Wifi className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Live — real-time updates connected</span>
+          </>
+        ) : (
+          <>
+            <span className="h-2.5 w-2.5 rounded-full bg-slate-600" />
+            <WifiOff className="w-3.5 h-3.5 text-slate-600" />
+            <span>Disconnected — reconnecting...</span>
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-6">

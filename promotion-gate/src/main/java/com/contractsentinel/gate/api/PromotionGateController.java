@@ -4,7 +4,15 @@ import com.contractsentinel.gate.audit.GateHistoryRepository;
 import com.contractsentinel.gate.model.GateCheckResponse;
 import com.contractsentinel.gate.model.GateHistory;
 import com.contractsentinel.gate.model.OverrideRequest;
+import com.contractsentinel.gate.policy.PolicyDecision;
+import com.contractsentinel.gate.policy.PolicyEngine;
+import com.contractsentinel.gate.policy.PolicyRepository;
+import com.contractsentinel.gate.policy.ViolationSummary;
 import io.micrometer.core.instrument.Counter;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Scope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -25,15 +33,21 @@ public class PromotionGateController {
     private static final Logger log = LoggerFactory.getLogger(PromotionGateController.class);
 
     private final GateHistoryRepository historyRepository;
+    private final PolicyEngine policyEngine;
+    private final PolicyRepository policyRepository;
     private final Counter gateDecisionsCounter;
     private final Counter gateDenyCounter;
     private final Counter gateOverrideCounter;
 
     public PromotionGateController(GateHistoryRepository historyRepository,
+                                   PolicyEngine policyEngine,
+                                   PolicyRepository policyRepository,
                                    Counter gateDecisionsCounter,
                                    Counter gateDenyCounter,
                                    Counter gateOverrideCounter) {
         this.historyRepository = historyRepository;
+        this.policyEngine = policyEngine;
+        this.policyRepository = policyRepository;
         this.gateDecisionsCounter = gateDecisionsCounter;
         this.gateDenyCounter = gateDenyCounter;
         this.gateOverrideCounter = gateOverrideCounter;
@@ -45,42 +59,66 @@ public class PromotionGateController {
             @RequestParam("version") String versionSha,
             @RequestParam("env") String targetEnv) {
 
-        log.info("Promotion check: service={}, version={}, env={}", serviceId, versionSha, targetEnv);
+        Span span = GlobalOpenTelemetry.getTracer("contract-sentinel")
+                .spanBuilder("gate.promote")
+                .setAttribute("service.id", serviceId)
+                .setAttribute("deployment.version", versionSha)
+                .setAttribute("deployment.environment", targetEnv)
+                .startSpan();
 
-        List<String> violations = List.of();
-        int driftScore = 0;
-        boolean allowed = true;
-        String reason = "No blocking violations found";
-        String recommendation = "proceed";
+        try (Scope scope = span.makeCurrent()) {
+            log.info("Promotion check: service={}, version={}, env={}", serviceId, versionSha, targetEnv);
 
-        if (!violations.isEmpty()) {
-            allowed = false;
-            reason = "Blocking violations detected";
-            recommendation = "block";
-            gateDenyCounter.increment();
-        } else {
-            gateDecisionsCounter.increment();
+            List<ViolationSummary> violations = policyRepository.getViolationSummaries(serviceId, targetEnv);
+            PolicyDecision decision = policyEngine.evaluate(violations, serviceId, targetEnv);
+
+            List<String> violationDetails = violations.stream()
+                    .map(v -> String.format("%s: %d violations", v.severity(), v.count()))
+                    .toList();
+
+            boolean allowed = "allow".equals(decision.action());
+            String reason = decision.reason();
+            String recommendation = allowed ? "proceed" : decision.action();
+
+            if (!allowed) {
+                gateDenyCounter.increment();
+            } else {
+                gateDecisionsCounter.increment();
+            }
+
+            span.setAttribute("decision", allowed ? "allow" : "deny");
+            span.setAttribute("policy.applied", decision.policyName() != null ? decision.policyName() : "none");
+            span.setAttribute("violation.count", (long) violations.size());
+
+            if (!allowed) {
+                span.setStatus(StatusCode.ERROR, reason);
+            }
+
+            GateCheckResponse response = new GateCheckResponse(allowed, reason, violationDetails, 0, 
+                    recommendation, decision.policyName(), decision.action());
+
+            GateHistory history = GateHistory.builder()
+                    .serviceId(serviceId)
+                    .versionSha(versionSha)
+                    .targetEnv(targetEnv)
+                    .decision(allowed ? "ALLOW" : "DENY")
+                    .driftScore(0)
+                    .timestamp(LocalDateTime.now())
+                    .build();
+            historyRepository.save(history);
+
+            log.info("Promotion decision: {} for service={} env={} (policy: {})", 
+                    history.getDecision(), serviceId, targetEnv, decision.policyName());
+            return ResponseEntity.ok(response);
+        } finally {
+            span.end();
         }
-
-        GateCheckResponse response = new GateCheckResponse(allowed, reason, violations, driftScore, recommendation);
-
-        GateHistory history = GateHistory.builder()
-                .serviceId(serviceId)
-                .versionSha(versionSha)
-                .targetEnv(targetEnv)
-                .decision(allowed ? "ALLOW" : "DENY")
-                .driftScore(driftScore)
-                .timestamp(LocalDateTime.now())
-                .build();
-        historyRepository.save(history);
-
-        log.info("Promotion decision: {} for service={} env={}", history.getDecision(), serviceId, targetEnv);
-        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/override")
     public ResponseEntity<GateCheckResponse> override(@RequestBody OverrideRequest request) {
-        log.info("Override request: service={}, version={}, env={}, by={}", request.serviceId(), request.versionSha(), request.targetEnv(), request.overrideBy());
+        log.info("Override request: service={}, version={}, env={}, by={}", 
+                request.serviceId(), request.versionSha(), request.targetEnv(), request.overrideBy());
 
         if (request.reason() == null || request.reason().isBlank()) {
             return ResponseEntity.badRequest().build();
@@ -88,7 +126,8 @@ public class PromotionGateController {
 
         gateOverrideCounter.increment();
 
-        GateCheckResponse response = new GateCheckResponse(true, "Overridden: " + request.reason(), List.of(), 0, "proceed");
+        GateCheckResponse response = new GateCheckResponse(true, "Overridden: " + request.reason(), 
+                List.of(), 0, "proceed", null, null);
 
         GateHistory history = GateHistory.builder()
                 .serviceId(request.serviceId())
@@ -101,7 +140,8 @@ public class PromotionGateController {
                 .build();
         historyRepository.save(history);
 
-        log.info("Override recorded for service={} env={} by={}", request.serviceId(), request.targetEnv(), request.overrideBy());
+        log.info("Override recorded for service={} env={} by={}", 
+                request.serviceId(), request.targetEnv(), request.overrideBy());
         return ResponseEntity.ok(response);
     }
 

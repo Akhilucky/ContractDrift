@@ -48,3 +48,7 @@ correlation:
 logging:
   level:
     com.contractsentinel: INFO
+
+sentinel:
+  auth:
+    jwt-secret: ${JWT_SECRET:change-me-in-production-at-least-32-chars!!}

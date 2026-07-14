@@ -112,3 +112,18 @@ export function getGateHistory(service?: string): Promise<GateDecision[]> {
   const params = service ? `?service=${encodeURIComponent(service)}` : ''
   return request<GateDecision[]>(`/api/v1/gate/history${params}`)
 }
+
+export interface DeploymentEvent {
+  id: string
+  service_id: string
+  version_sha: string
+  environment: string
+  deployed_at: string
+  status: string
+  violations?: Violation[]
+}
+
+export function getDeployments(service?: string): Promise<DeploymentEvent[]> {
+  const params = service ? `?service=${encodeURIComponent(service)}` : ''
+  return request<DeploymentEvent[]>(`/api/v1/gate/deployments${params}`)
+}
